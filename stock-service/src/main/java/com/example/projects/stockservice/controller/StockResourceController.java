@@ -1,55 +1,57 @@
 package com.example.projects.stockservice.controller;
 
-import java.io.IOException;
-import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.stream.Collectors;
-
+import com.example.projects.stockservice.model.Quote;
+import com.example.projects.stockservice.service.StockPriceService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.CollectionUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 
-import com.example.projects.stockservice.model.Quote;
-
-import yahoofinance.Stock;
-import yahoofinance.YahooFinance;
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/rest/stock")
 public class StockResourceController {
 
+	private static final Logger LOG = LoggerFactory.getLogger(StockResourceController.class);
+
 	@Autowired
-	RestTemplate restTemplate;
+	private RestTemplate restTemplate;
+
+	@Autowired
+	private StockPriceService stockPriceService;
 
 	@GetMapping("/{username}")
 	public List<Quote> getStock(@PathVariable("username") final String username) {
+		LOG.info("Received request to fetch stock quotes for user {}", username);
 
-		ResponseEntity<List<String>> quoteResponse = restTemplate.exchange("http://db-service/rest/db/" + username,
-				HttpMethod.GET, null, new ParameterizedTypeReference<List<String>>() {
-				});
+		ResponseEntity<List<String>> quoteResponse = restTemplate.exchange(
+				"http://db-service/rest/db/" + username,
+				HttpMethod.GET,
+				null,
+				new ParameterizedTypeReference<List<String>>() {});
 
 		List<String> quotes = quoteResponse.getBody();
-		return quotes.stream().map(quote -> {
-			//Stock stock = getStockPrice(quote);
-			return new Quote(quote, new BigDecimal(500));
-		}).collect(Collectors.toList());
-		
-		
-	}
-
-	private Stock getStockPrice(String quote) {
-		try {
-			return YahooFinance.get(quote);
-		} catch (IOException e) {
-			e.printStackTrace();
-			return new Stock(quote);
+		if (CollectionUtils.isEmpty(quotes)) {
+			LOG.info("No quotes found in db-service for user {}", username);
+			return List.of();
 		}
+
+		LOG.info("Retrieved {} quotes for user {} from db-service. Retrieving market prices..", quotes.size(), username);
+
+		return quotes.stream().map(quoteSymbol -> {
+			BigDecimal price = stockPriceService.getPrice(quoteSymbol);
+			return new Quote(quoteSymbol, price);
+		}).collect(Collectors.toList());
 	}
 }
